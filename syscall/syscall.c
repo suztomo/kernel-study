@@ -18,7 +18,7 @@
 #include <linux/unistd.h>	/* The list of system calls */
 
 #include <linux/mm.h> /* VM_READ etc */
-#include <asm-cris/cacheflush.h> /* change_page_attr */
+#include <asm-x86/cacheflush.h> /* change_page_attr */
 
 /* 
  * For the current (process) structure, we need
@@ -145,7 +145,6 @@ int init_module()
   printk(KERN_ALERT "you value your file system, it will ");
   printk(KERN_ALERT "be \"sync; rmmod\" \n");
   printk(KERN_ALERT "when you remove this module.\n");
-
 
 
 
