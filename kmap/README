@@ -1,0 +1,2 @@
+Override sys_call_table[__NR_open], without modification of kernel source code.
+
