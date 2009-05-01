@@ -17,6 +17,7 @@
 #include <linux/moduleparam.h>	/* which will have params */
 #include <linux/unistd.h>	/* The list of system calls */
 
+#include <linux/highmem.h>
 #include <linux/mm.h> /* VM_READ etc */
 #include <asm-x86/cacheflush.h> /* change_page_attr */
 
@@ -42,26 +43,6 @@ MODULE_LICENSE("GPL");
 extern void *sys_call_table[];
 //void *sys_call_table_local;
 //void **sys_call_table_local[];
-
-unsigned long **find_sys_call_table(void)
-{
-
-  unsigned long **sctable;
-  unsigned long ptr;
-  sctable = NULL;
-  for (ptr = (unsigned long)&strstr;
-       ptr < (unsigned long)&boot_cpu_data;
-       ptr += sizeof(void*)) {
-
-    unsigned long *p;
-    p = (unsigned long *)ptr;
-    if (p[__NR_close] == (unsigned long) sys_close) {
-      sctable = (unsigned long **)p;
-      return &sctable[0];
-    }
-  }
-  return NULL;
-}
 
 /* 
  * UID we want to spy on - will be filled from the
@@ -132,6 +113,10 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
  */
 int init_module()
 {
+  struct page *pg;
+  unsigned long target;
+  unsigned long open_addr = (unsigned long)&(sys_call_table[__NR_open]);
+
 
   /*
   struct page *pg;
@@ -157,33 +142,33 @@ int init_module()
     return 1;
   }
   /*
-  pg = virt_to_page(sys_call_table_local);
+
   prot.pgprot = VM_READ | VM_WRITE | VM_EXEC;
   change_page_attr(pg, 1, prot); // obsolete
   */
-  printk(KERN_INFO "sys_call_table is %p\n", sys_call_table);
+  pg = virt_to_page(open_addr);
+  target = (unsigned long)kmap(pg);
+  target += open_addr & 0xFFF;
 
-  printk(KERN_INFO "assumed close is %p\n", sys_call_table[__NR_close]);
-  printk(KERN_INFO "real    close is %p\n", sys_close);
-
-
-
-	/* 
-	 * Keep a pointer to the original function in
-	 * original_call, and then replace the system call
-	 * in the system call table with our_sys_open 
-	 */
-    original_call = sys_call_table[__NR_open];
-    printk(KERN_INFO "old open is %p\n", original_call);
-    printk(KERN_INFO "going to write at %p", &(sys_call_table[__NR_open]));
-    printk(KERN_INFO "new open is %p\n", our_sys_open);
-    printk(KERN_INFO "new open is %p\n", our_sys_open);
-
-    sys_call_table[__NR_open] = our_sys_open;
-    //    sys_call_table[__NR_open] = original_call;
+  printk(KERN_INFO "target is %p\n", (void **)target);
 
 
-	/* 
+  /* 
+   * Keep a pointer to the original function in
+   * original_call, and then replace the system call
+   * in the system call table with our_sys_open 
+   */
+  original_call = sys_call_table[__NR_open];
+  printk(KERN_INFO "target points %p\n", *(void **)target);
+  printk(KERN_INFO "sys_open is %p\n", original_call);
+
+  *(void **)target = our_sys_open;
+  *(void **)target = original_call;
+  //  sys_call_table_local[__NR_open] = our_sys_open;
+
+  kunmap(pg);
+
+  /* 
 	 * To get the address of the function for system
 	 * call foo, go to sys_call_table[__NR_foo]. 
 	 */
@@ -198,20 +183,26 @@ int init_module()
  */
 void cleanup_module()
 {
+  void **sys_call_table_local;
+  struct page *pg;
+  pg = virt_to_page(sys_call_table);
+  sys_call_table_local = kmap(pg);
 
   //  * Return the system call back to normal
   printk(KERN_INFO "sys_call_table: %p\n", sys_call_table);
   printk(KERN_INFO "current open  : %p\n", sys_call_table[__NR_open]);
   printk(KERN_INFO "our open      : %p\n", our_sys_open);
 
-  if (sys_call_table[__NR_open] != our_sys_open) {
+  if (sys_call_table_local[__NR_open] != our_sys_open) {
     printk(KERN_ALERT "Somebody else also played with the ");
     printk(KERN_ALERT "open system call\n");
     printk(KERN_ALERT "The system may be left in ");
     printk(KERN_ALERT "an unstable state.\n");
   } else {
-    sys_call_table[__NR_open] = original_call;
+    sys_call_table_local[__NR_open] = original_call;
+    //    sys_call_table[__NR_open] = original_call;
   }
 
+  kunmap(pg);
   printk(KERN_INFO "Ended spying on UID: %d\n", uid);
 }
