@@ -78,6 +78,7 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 {
   int i = 0;
   char ch;
+  int ret;
 
   /* 
    * Check if this is the user we're spying on 
@@ -86,7 +87,7 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
     /* 
      * Report the file, if relevant 
      */
-    printk("Opened file by %d: ", uid);
+    printk("1: Opened file by %d: ", uid);
     do {
       get_user(ch, filename + i);
       i++;
@@ -99,7 +100,23 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
    * Call the original sys_open - otherwise, we lose
    * the ability to open files 
    */
-  return original_call(filename, flags, mode);
+  ret = original_call(filename, flags, mode);
+
+  i = 0;
+  if (uid == current->uid) {
+    /* 
+     * Report the file, if relevant 
+     */
+    printk("2: Opened file by %d: ", uid);
+    do {
+      get_user(ch, filename + i);
+      i++;
+      printk("%c", ch);
+    } while (ch);
+    printk("\n");
+  }
+
+  return ret;
 }
 
 /* 
