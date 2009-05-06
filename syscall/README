@@ -1,0 +1,8 @@
+This system call trap sample works on a kernel which have been
+compiled with:
+  In "kernel/kallsyms.c"
+    extern void * sys_call_table[];
+    EXPORT_SYMBOL(sys_call_table);
+
+  In "arch/x86/kernel/entry-32.S"
+    .section rodata => .data

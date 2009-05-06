@@ -40,6 +40,8 @@ MODULE_LICENSE("GPL");
  * and recompile it.
  */
 extern void *sys_call_table[];
+//void **sys_call_table = (void **)0xc0385880;
+
 //void *sys_call_table_local;
 //void **sys_call_table_local[];
 
@@ -70,61 +72,34 @@ unsigned long **find_sys_call_table(void)
 static int uid;
 module_param(uid, int, 0644);
 
-/* 
- * A pointer to the original system call. The reason
- * we keep this, rather than call the original function
- * (sys_open), is because somebody else might have
- * replaced the system call before us. Note that this
- * is not 100% safe, because if another module
- * replaced sys_open before us, then when we're inserted
- * we'll call the function in that module - and it
- * might be removed before we are.
- *
- * Another reason for this is that we can't get sys_open.
- * It's a static variable, so it is not exported. 
- */
 asmlinkage int (*original_call) (const char *, int, int);
 
-/* 
- * The function we'll replace sys_open (the function
- * called when you call the open system call) with. To
- * find the exact prototype, with the number and type
- * of arguments, we find the original function first
- * (it's at fs/open.c).
- *
- * In theory, this means that we're tied to the
- * current version of the kernel. In practice, the
- * system calls almost never change (it would wreck havoc
- * and require programs to be recompiled, since the system
- * calls are the interface between the kernel and the
- * processes).
- */
 asmlinkage int our_sys_open(const char *filename, int flags, int mode)
 {
-	int i = 0;
-	char ch;
+  int i = 0;
+  char ch;
 
-	/* 
-	 * Check if this is the user we're spying on 
-	 */
-	if (uid == current->uid) {
-		/* 
-		 * Report the file, if relevant 
-		 */
-		printk("Opened file by %d: ", uid);
-		do {
-			get_user(ch, filename + i);
-			i++;
-			printk("%c", ch);
-		} while (ch);
-		printk("\n");
-	}
+  /* 
+   * Check if this is the user we're spying on 
+   */
+  if (uid == current->uid) {
+    /* 
+     * Report the file, if relevant 
+     */
+    printk("Opened file by %d: ", uid);
+    do {
+      get_user(ch, filename + i);
+      i++;
+      printk("%c", ch);
+    } while (ch);
+    printk("\n");
+  }
 
-	/* 
-	 * Call the original sys_open - otherwise, we lose
-	 * the ability to open files 
-	 */
-	return original_call(filename, flags, mode);
+  /* 
+   * Call the original sys_open - otherwise, we lose
+   * the ability to open files 
+   */
+  return original_call(filename, flags, mode);
 }
 
 /* 
@@ -134,8 +109,8 @@ int init_module()
 {
 
   /*
-  struct page *pg;
-  pgprot_t prot;
+    struct page *pg;
+    pgprot_t prot;
   */
   /* 
    * Warning - too late for it now, but maybe for
@@ -157,40 +132,43 @@ int init_module()
     return 1;
   }
   /*
-  pg = virt_to_page(sys_call_table_local);
-  prot.pgprot = VM_READ | VM_WRITE | VM_EXEC;
-  change_page_attr(pg, 1, prot); // obsolete
+    pg = virt_to_page(sys_call_table_local);
+    prot.pgprot = VM_READ | VM_WRITE | VM_EXEC;
+    change_page_attr(pg, 1, prot); // obsolete
   */
   printk(KERN_INFO "sys_call_table is %p\n", sys_call_table);
 
-  printk(KERN_INFO "assumed close is %p\n", sys_call_table[__NR_close]);
-  printk(KERN_INFO "real    close is %p\n", sys_close);
+  printk(KERN_INFO "assumed open is %p\n", sys_call_table[__NR_open]);
+  //  printk(KERN_INFO "real    open is %p\n", sys_open);
 
 
 
-	/* 
-	 * Keep a pointer to the original function in
-	 * original_call, and then replace the system call
-	 * in the system call table with our_sys_open 
-	 */
-    original_call = sys_call_table[__NR_open];
-    printk(KERN_INFO "old open is %p\n", original_call);
-    printk(KERN_INFO "going to write at %p", &(sys_call_table[__NR_open]));
-    printk(KERN_INFO "new open is %p\n", our_sys_open);
-    printk(KERN_INFO "new open is %p\n", our_sys_open);
+  /* 
+   * Keep a pointer to the original function in
+   * original_call, and then replace the system call
+   * in the system call table with our_sys_open 
+   */
+  original_call = sys_call_table[__NR_open];
 
-    sys_call_table[__NR_open] = our_sys_open;
-    //    sys_call_table[__NR_open] = original_call;
+  /*
+  printk(KERN_INFO "old open is %p\n", original_call);
+  printk(KERN_INFO "going to write at %p", &(sys_call_table[__NR_open]));
+  printk(KERN_INFO "new open is %p\n", our_sys_open);
+  printk(KERN_INFO "new open is %p\n", our_sys_open);
+  */
+
+  sys_call_table[__NR_open] = our_sys_open;
+  //    sys_call_table[__NR_open] = original_call;
 
 
-	/* 
-	 * To get the address of the function for system
-	 * call foo, go to sys_call_table[__NR_foo]. 
-	 */
+  /* 
+   * To get the address of the function for system
+   * call foo, go to sys_call_table[__NR_foo]. 
+   */
 
-	printk(KERN_INFO "Spying on UID:%d\n", uid);
+  printk(KERN_INFO "Spying on UID:%d\n", uid);
 
-	return 0;
+  return 0;
 }
 
 /* 
