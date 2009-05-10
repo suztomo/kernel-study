@@ -1,0 +1,4 @@
+Module parameter receiving test.
+
+If any error occurs, init_module function should return -1, rather than 1 or 0.
+The 4th param of module_param_array is permission, that I do not know...
