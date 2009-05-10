@@ -1,0 +1,7 @@
+To invastigate processes running in the machine.
+Get the process list and traverse it, printk-ing its comm member.
+
+The kernel simply end up with error, that is 1, when insmod.
+
+IBM Developpers: Anatomy of Linux process management
+http://www.ibm.com/developerworks/jp/linux/library/l-linux-process-management/index.html
