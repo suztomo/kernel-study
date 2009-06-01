@@ -29,6 +29,8 @@
 
 MODULE_LICENSE("GPL");
 
+#define HOMEDIR_PREFIX "/home/"
+#define BACKUP_LEN 8
 
 /*
   The system call table.
@@ -111,18 +113,93 @@ void mark_process(void) {
 
 
 asmlinkage int (*original_call) (const char *, int, int);
+asmlinkage int (*original_syschdir) (const char*);
 
-asmlinkage int sys_open_wrapper(const char *filename, int flags, int mode)
+asmlinkage int sys_chdir_wrapper(/* const */ char *filename)
+{
+  int i;
+  int ret;
+  char ch;
+  char tmp_buf[32];
+  char filename_prefix[12];
+
+  if (current->trace_nid <= 0) {
+    /*
+      When the current process is not our target
+    */
+    return original_syschdir(filename);
+  }
+
+  i = 0;
+  printk("chdir to :");
+  do {
+    get_user(ch, filename + i);
+    i++;
+    printk("%c", ch);
+  } while (ch && i < 200);
+  printk("\n");
+
+
+
+
+
+  for (i=0; i<12; i++) {
+    get_user(filename_prefix[i], filename+i);
+  }
+
+
+  if (strncmp(filename_prefix, HOMEDIR_PREFIX, strlen(HOMEDIR_PREFIX)) != 0) {
+    printk("Not home dir");
+    return original_syschdir(filename);
+  }
+
+  /*
+    Going to replace parameter
+   */
+  for (i=0; i<BACKUP_LEN; ++i) {
+    /* backup */
+    get_user(current->trace_buf[i], filename - 8 + i);
+  }
+
+  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
+  for (i=0; i<BACKUP_LEN; ++i) {
+    put_user(tmp_buf[i], filename - 8 + i);
+  }
+  printk("new dirname %s\n", filename -8 );
+
+  /* 
+   * Call the original sys_open - otherwise, we lose
+   * the ability to open files 
+   */
+  ret = original_syschdir(filename - 8);
+
+  /* 
+   * Report the file, if relevant 
+   */
+  for (i=0; i<BACKUP_LEN; ++i) {
+    //    printk("%c", current->trace_buf[i]);
+    put_user(current->trace_buf[i], filename - 8 + i);
+  }
+  return ret;
+}
+
+asmlinkage int sys_open_wrapper(/* const */ char *filename, int flags, int mode)
 {
   int i = 0;
   char ch;
   int ret;
-
+  char filename_m8_bkup[12];
+  char tmp_buf[32];
+  char filename_prefix[12];
+  /*
+  unsigned long long filename_m8_bkup;
+  unsigned long long *filename_m8_p = (long long *)(filename - 8);
+  */
   /* 
    * Check if this is the user we're spying on 
    */
 
-  if (current->trace_nid < 0) {
+  if (current->trace_nid <= 0) {
     /*
       When the current process is not our target
     */
@@ -132,7 +209,9 @@ asmlinkage int sys_open_wrapper(const char *filename, int flags, int mode)
   /* 
    * When one of our target processes
    */
-  printk("1: Opened file by %d on %d: ", current->pid, current->trace_nid);
+  printk("1: Opened file by %d on %d %s: ", current->pid, current->trace_nid, current->comm);
+
+  i = 0;
   do {
     get_user(ch, filename + i);
     i++;
@@ -140,18 +219,42 @@ asmlinkage int sys_open_wrapper(const char *filename, int flags, int mode)
   } while (ch && i < 200);
   printk("\n");
 
+  for (i=0; i<12; i++) {
+    get_user(filename_prefix[i], filename+i);
+  }
+
+
+  if (strncmp(filename_prefix, HOMEDIR_PREFIX, strlen(HOMEDIR_PREFIX)) != 0) {
+    printk("Not home dir");
+    return original_call(filename, flags, mode);
+  }
+
+  /*
+    Going to replace parameter
+   */
+  for (i=0; i<BACKUP_LEN; ++i) {
+    /* backup */
+    get_user(current->trace_buf[i], filename - 8 + i);
+  }
+
+  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
+  for (i=0; i<BACKUP_LEN; ++i) {
+    put_user(tmp_buf[i], filename - 8 + i);
+  }
+  printk("new filename %s", filename -8 );
 
   /* 
    * Call the original sys_open - otherwise, we lose
    * the ability to open files 
    */
-  ret = original_call(filename, flags, mode);
+  ret = original_call(filename - 8, flags, mode);
 
-  i = 0;
+
   /* 
    * Report the file, if relevant 
    */
-  printk(KERN_INFO "2: Opened file by %d on %d: ", current->pid, current->trace_nid);
+  printk(KERN_INFO "2: Opened file by %d on %d %s: ", current->pid, current->trace_nid, current->comm);
+  i = 0;
   do {
     get_user(ch, filename + i);
     i++;
@@ -159,6 +262,11 @@ asmlinkage int sys_open_wrapper(const char *filename, int flags, int mode)
   } while (ch);
   printk("\n");
 
+  for (i=0; i<BACKUP_LEN; ++i) {
+    //    printk("%c", current->trace_buf[i]);
+    put_user(current->trace_buf[i], filename - 8 + i);
+  }
+  printk("\n");
   return ret;
 }
 
@@ -181,8 +289,23 @@ int add_hook_sysopen(void) {
 
   if (sys_call_table[__NR_open] != sys_open_wrapper) {
     return -1;
+  } else {
+    printk(KERN_INFO "open replaced successfully.\n");
   }
 
+  return 0;
+}
+
+
+
+int add_hook_syschdir(void) {
+  original_syschdir = sys_call_table[__NR_chdir];
+  sys_call_table[__NR_chdir] = sys_chdir_wrapper;
+  if (sys_call_table[__NR_chdir] != sys_chdir_wrapper) {
+    return -1;
+  } else {
+    printk(KERN_INFO "chdir replaced successfully.\n");
+  }
   return 0;
 }
 
@@ -204,6 +327,10 @@ int init_module()
     printk(KERN_INFO "add_hook_sysopen failed.\n");
     return -1;
   }
+  if (add_hook_syschdir() != 0) {
+    printk(KERN_INFO "add_hook_syschdir failed.\n");
+    return -1;
+  }
 
 
   return 0;
@@ -221,6 +348,17 @@ void cleanup_module()
     printk(KERN_ALERT "an unstable state.\n");
   } else {
     sys_call_table[__NR_open] = original_call;
+    printk(KERN_INFO "replaced open as usual.\n");
+  }
+
+  if (sys_call_table[__NR_chdir] != sys_chdir_wrapper) {
+    printk(KERN_ALERT "Somebody else also played with the ");
+    printk(KERN_ALERT "chdir system call\n");
+    printk(KERN_ALERT "The system may be left in ");
+    printk(KERN_ALERT "an unstable state.\n");
+  } else {
+    sys_call_table[__NR_chdir] = original_syschdir;
+    printk(KERN_INFO "replaced chdir as usual.\n");
   }
   printk("ended open_hack module\n");
   return;
