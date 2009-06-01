@@ -1,0 +1,7 @@
+open systemcall tracing sample.
+
+Example
+ make
+ sudo insmod open_hack.ko pid_array=4232 node_array=1
+ dmesg
+ return
