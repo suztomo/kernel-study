@@ -31,6 +31,13 @@ MODULE_LICENSE("GPL");
 
 
 /*
+  The system call table.
+  The kernel should be modified as EXPORT_SYMBOL(sys_call_table)
+ */
+extern void *sys_call_table[];
+
+
+/*
   Gets a mapping of (process id -> node id)
   Fill unused entries with -1.
  */
@@ -48,6 +55,7 @@ int is_target_proc(pid_t candidate_pid)
 {
   int i;
   int p_i = (int)candidate_pid;
+
   for (i=0; i<pid_array_count; ++i) {
     if (pid_array[i] < 0) {
       break;
@@ -56,7 +64,7 @@ int is_target_proc(pid_t candidate_pid)
       return i;
     }
   }
-  return 0;
+  return -1;
 }
 
 int check_args(void) {
@@ -89,25 +97,98 @@ int check_args(void) {
 */
 void mark_process(void) {
   struct task_struct *task = &init_task;
-  int node_id;
+  int node_index;
   do {
-    if ((node_id = is_target_proc(task->pid)) != 0) {
-      task->trace_nid = node_id;
+    if ((node_index = is_target_proc(task->pid)) >= 0) {
+      task->trace_nid = node_array[node_index];
       printk(KERN_INFO "*** %s [%d] parent %s\n",
              task->comm, task->trace_nid, task->parent->comm);
+    } else {
+      task->trace_nid = -1;
     }
   } while ((task = next_task(task)) != &init_task);
 }
 
+
+asmlinkage int (*original_call) (const char *, int, int);
+
+asmlinkage int sys_open_wrapper(const char *filename, int flags, int mode)
+{
+  int i = 0;
+  char ch;
+  int ret;
+
+  /* 
+   * Check if this is the user we're spying on 
+   */
+
+  if (current->trace_nid < 0) {
+    /*
+      When the current process is not our target
+    */
+    return original_call(filename, flags, mode);
+  }
+
+  /* 
+   * When one of our target processes
+   */
+  printk("1: Opened file by %d on %d: ", current->pid, current->trace_nid);
+  do {
+    get_user(ch, filename + i);
+    i++;
+    printk("%c", ch);
+  } while (ch && i < 200);
+  printk("\n");
+
+
+  /* 
+   * Call the original sys_open - otherwise, we lose
+   * the ability to open files 
+   */
+  ret = original_call(filename, flags, mode);
+
+  i = 0;
+  /* 
+   * Report the file, if relevant 
+   */
+  printk(KERN_INFO "2: Opened file by %d on %d: ", current->pid, current->trace_nid);
+  do {
+    get_user(ch, filename + i);
+    i++;
+    printk("%c", ch);
+  } while (ch);
+  printk("\n");
+
+  return ret;
+}
+
+
+
 int add_hook_sysopen(void) {
+  /* 
+   * Keep a pointer to the original function in
+   * original_call, and then replace the system call
+   * in the system call table with our_sys_open 
+   */
+  original_call = sys_call_table[__NR_open];
+
+
+  printk(KERN_INFO "old open is %p\n", original_call);
+  printk(KERN_INFO "going to write at %p", &(sys_call_table[__NR_open]));
+  printk(KERN_INFO "new open is %p\n", sys_open_wrapper);
+
+  sys_call_table[__NR_open] = sys_open_wrapper;
+
+  if (sys_call_table[__NR_open] != sys_open_wrapper) {
+    return -1;
+  }
+
   return 0;
 }
 
 /* 
  * Initialize the module - replace the system call 
  */
-
-
 int init_module()
 {
   /*
@@ -121,7 +202,9 @@ int init_module()
 
   if (add_hook_sysopen() != 0) {
     printk(KERN_INFO "add_hook_sysopen failed.\n");
+    return -1;
   }
+
 
   return 0;
 }
@@ -131,6 +214,14 @@ int init_module()
  */
 void cleanup_module()
 {
-  printk("ended process module\n");
+  if (sys_call_table[__NR_open] != sys_open_wrapper) {
+    printk(KERN_ALERT "Somebody else also played with the ");
+    printk(KERN_ALERT "open system call\n");
+    printk(KERN_ALERT "The system may be left in ");
+    printk(KERN_ALERT "an unstable state.\n");
+  } else {
+    sys_call_table[__NR_open] = original_call;
+  }
+  printk("ended open_hack module\n");
   return;
 }
