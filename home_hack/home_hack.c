@@ -53,6 +53,40 @@ int node_array_count;
 module_param_array(node_array, int, &node_array_count, 0000);
 
 
+#define MAKE_REPLACE_SYSCALL(call)                        \
+  int add_hook_sys_##call(void) {                         \
+    original_sys_##call = sys_call_table[__NR_##call];    \
+    sys_call_table[__NR_##call] = sys_##call##_wrapper;         \
+    if (sys_call_table[__NR_##call] != sys_##call##_wrapper) {  \
+      return -1;                                                \
+    } else {                                                    \
+      printk(KERN_INFO #call " replaced successfully.\n");      \
+    }                                                           \
+    return 0;                                                   \
+  }
+
+#define ADD_HOOK_SYS(call) \
+  do {\
+    if (add_hook_sys_##call() != 0) {                   \
+      printk(KERN_INFO "add_hook_" #call " failed.\n");  \
+      return -1;                                        \
+    }                                                   \
+  }while(0)
+
+#define CLEANUP_SYSCALL(call)                                   \
+  do {                                                          \
+    if (sys_call_table[__NR_##call] != sys_##call##_wrapper) {  \
+      printk(KERN_ALERT "Somebody else also played with the "); \
+      printk(KERN_ALERT #call " system call\n");                  \
+      printk(KERN_ALERT "The system may be left in ");          \
+      printk(KERN_ALERT "an unstable state.\n");                \
+    } else {                                                    \
+      sys_call_table[__NR_##call] = original_sys_##call;        \
+      printk(KERN_INFO "replaced " #call " as usual.\n");    \
+    }                                                           \
+  } while(0);
+
+
 int is_target_proc(pid_t candidate_pid)
 {
   int i;
@@ -112,210 +146,167 @@ void mark_process(void) {
 }
 
 
-asmlinkage int (*original_call) (const char *, int, int);
-//asmlinkage int (*original_syschdir) (const char*);
 
-#define REPLACE_SYSCALL(call) \
-  asmlinkage int (*original_sys##call) (const char *);
-REPLACE_SYSCALL(chdir)
+/*
+  original calls
+ */
+asmlinkage int (*original_sys_open) (const char *, int, int);
+asmlinkage int (*original_sys_chdir) (const char*);
+asmlinkage int (*original_sys_stat) ();
+asmlinkage int (*original_sys_stat64) ();
 
-asmlinkage int sys_chdir_wrapper(/* const */ char *filename)
+char *replace_path_if_necessary(char *filename)
+{
+  char filename_prefix[12];
+  char tmp_buf[BACKUP_LEN+12];
+  int i;
+  for (i=0; i<12; i++) {
+    get_user(filename_prefix[i], filename+i);
+  }
+
+  if (strncmp(filename_prefix, HOMEDIR_PREFIX, strlen(HOMEDIR_PREFIX)) != 0) {
+    return NULL;
+  }
+
+  /*
+    Going to replace parameter
+   */
+  for (i=0; i<BACKUP_LEN; ++i) {
+    /* backup */
+    get_user(current->trace_buf[i], filename - 8 + i);
+  }
+
+  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
+  for (i=0; i<BACKUP_LEN; ++i) {
+    put_user(tmp_buf[i], filename - BACKUP_LEN + i);
+  }
+  printk("new dirname %s\n", filename - BACKUP_LEN );
+
+  return filename - BACKUP_LEN;
+}
+
+void restore_path(char *filename)
 {
   int i;
-  int ret;
-  char ch;
-  char tmp_buf[32];
-  char filename_prefix[12];
-
-  if (current->trace_nid <= 0) {
-    /*
-      When the current process is not our target
-    */
-    return original_syschdir(filename);
-  }
-
-  i = 0;
-  printk("chdir to :");
-  do {
-    get_user(ch, filename + i);
-    i++;
-    printk("%c", ch);
-  } while (ch && i < 200);
-  printk("\n");
-
-
-
-
-
-  for (i=0; i<12; i++) {
-    get_user(filename_prefix[i], filename+i);
-  }
-
-
-  if (strncmp(filename_prefix, HOMEDIR_PREFIX, strlen(HOMEDIR_PREFIX)) != 0) {
-    printk("Not home dir");
-    return original_syschdir(filename);
-  }
-
-  /*
-    Going to replace parameter
-   */
-  for (i=0; i<BACKUP_LEN; ++i) {
-    /* backup */
-    get_user(current->trace_buf[i], filename - 8 + i);
-  }
-
-  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
-  for (i=0; i<BACKUP_LEN; ++i) {
-    put_user(tmp_buf[i], filename - 8 + i);
-  }
-  printk("new dirname %s\n", filename -8 );
-
-  /* 
-   * Call the original sys_open - otherwise, we lose
-   * the ability to open files 
-   */
-  ret = original_syschdir(filename - 8);
-
-  /* 
-   * Report the file, if relevant 
-   */
   for (i=0; i<BACKUP_LEN; ++i) {
     //    printk("%c", current->trace_buf[i]);
     put_user(current->trace_buf[i], filename - 8 + i);
   }
-  return ret;
 }
 
-asmlinkage int sys_open_wrapper(/* const */ char *filename, int flags, int mode)
+asmlinkage int sys_chdir_wrapper(/* const */ char *path)
 {
-  int i = 0;
-  char ch;
   int ret;
-  char filename_m8_bkup[12];
-  char tmp_buf[32];
-  char filename_prefix[12];
-  /*
-  unsigned long long filename_m8_bkup;
-  unsigned long long *filename_m8_p = (long long *)(filename - 8);
-  */
-  /* 
-   * Check if this is the user we're spying on 
-   */
+  char *new_path;
 
   if (current->trace_nid <= 0) {
     /*
       When the current process is not our target
     */
-    return original_call(filename, flags, mode);
+    return original_sys_chdir(path);
   }
-
-  /* 
-   * When one of our target processes
-   */
-  printk("1: Opened file by %d on %d %s: ", current->pid, current->trace_nid, current->comm);
-
-  i = 0;
-  do {
-    get_user(ch, filename + i);
-    i++;
-    printk("%c", ch);
-  } while (ch && i < 200);
-  printk("\n");
-
-  for (i=0; i<12; i++) {
-    get_user(filename_prefix[i], filename+i);
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_chdir(path);
   }
-
-
-  if (strncmp(filename_prefix, HOMEDIR_PREFIX, strlen(HOMEDIR_PREFIX)) != 0) {
-    printk("Not home dir");
-    return original_call(filename, flags, mode);
-  }
-
-  /*
-    Going to replace parameter
-   */
-  for (i=0; i<BACKUP_LEN; ++i) {
-    /* backup */
-    get_user(current->trace_buf[i], filename - 8 + i);
-  }
-
-  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
-  for (i=0; i<BACKUP_LEN; ++i) {
-    put_user(tmp_buf[i], filename - 8 + i);
-  }
-  printk("new filename %s", filename -8 );
-
   /* 
    * Call the original sys_open - otherwise, we lose
    * the ability to open files 
    */
-  ret = original_call(filename - 8, flags, mode);
-
-
-  /* 
-   * Report the file, if relevant 
-   */
-  printk(KERN_INFO "2: Opened file by %d on %d %s: ", current->pid, current->trace_nid, current->comm);
-  i = 0;
-  do {
-    get_user(ch, filename + i);
-    i++;
-    printk("%c", ch);
-  } while (ch);
-  printk("\n");
-
-  for (i=0; i<BACKUP_LEN; ++i) {
-    //    printk("%c", current->trace_buf[i]);
-    put_user(current->trace_buf[i], filename - 8 + i);
-  }
-  printk("\n");
+  ret = original_sys_chdir(new_path);
+  restore_path(path);
   return ret;
 }
 
 
 
-int add_hook_sysopen(void) {
+asmlinkage int sys_open_wrapper(/* const */ char *path, int flags, int mode)
+{
+  int ret;
+  char *new_path;
+  if (current->trace_nid <= 0) {
+    return original_sys_open(path, flags, mode);
+  }
+
+  printk("*** Opened file by %d on %d %s: %s\n", current->pid,
+         current->trace_nid, current->comm, path);
+
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_open(path, flags, mode);
+  }
   /* 
-   * Keep a pointer to the original function in
-   * original_call, and then replace the system call
-   * in the system call table with our_sys_open 
+   * Call the original sys_open - otherwise, we lose
+   * the ability to open files 
    */
-  original_call = sys_call_table[__NR_open];
+  ret = original_sys_open(new_path, flags, mode);
+  restore_path(path);
+  return ret;
+}
+/*
 
-
-  printk(KERN_INFO "old open is %p\n", original_call);
-  printk(KERN_INFO "going to write at %p", &(sys_call_table[__NR_open]));
-  printk(KERN_INFO "new open is %p\n", sys_open_wrapper);
-
-  sys_call_table[__NR_open] = sys_open_wrapper;
-
-  if (sys_call_table[__NR_open] != sys_open_wrapper) {
-    return -1;
-  } else {
-    printk(KERN_INFO "open replaced successfully.\n");
+#define DECLARE_FUNC(fname, arg) \
+  int hogefunc(arg) {            \
+    return original_##fname(arg);               \
   }
 
-  return 0;
+DECLARE_FUNC(open, char*path, int mode)
+DECLARE_FUNC(chdir, char*path)
+
+*/
+
+
+asmlinkage long sys_stat_wrapper(char *path, struct __old_kernel_stat *buf)
+{
+  long ret;
+  char *new_path;
+  if (current->trace_nid <= 0) {
+    return original_sys_stat(path, buf);
+  }
+
+  printk("*** Stated file %s by %d on %d %s: \n", path, current->pid,
+         current->trace_nid, current->comm);
+
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_stat(path, buf);
+  }
+  ret = original_sys_stat(new_path, buf);
+  restore_path(path);
+  return ret;
+}
+
+asmlinkage long sys_stat64_wrapper(char *path, struct stat64 *buf)
+{
+  long ret;
+  char *new_path;
+  if (current->trace_nid <= 0) {
+    return original_sys_stat64(path, buf);
+  }
+
+  printk("*** Stat64ed file %s by %d on %d %s: \n", path, current->pid,
+         current->trace_nid, current->comm);
+
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_stat64(path, buf);
+  }
+  ret = original_sys_stat64(new_path, buf);
+  restore_path(path);
+  return ret;
 }
 
 
+MAKE_REPLACE_SYSCALL(open);
+MAKE_REPLACE_SYSCALL(chdir);
+MAKE_REPLACE_SYSCALL(stat);
+MAKE_REPLACE_SYSCALL(stat64);
 
-int add_hook_syschdir(void) {
-  original_syschdir = sys_call_table[__NR_chdir];
-  sys_call_table[__NR_chdir] = sys_chdir_wrapper;
-  if (sys_call_table[__NR_chdir] != sys_chdir_wrapper) {
-    return -1;
-  } else {
-    printk(KERN_INFO "chdir replaced successfully.\n");
-  }
-  return 0;
-}
 
 /* 
  * Initialize the module - replace the system call 
  */
+
 int init_module()
 {
   /*
@@ -327,43 +318,26 @@ int init_module()
 
   mark_process();
 
-  if (add_hook_sysopen() != 0) {
-    printk(KERN_INFO "add_hook_sysopen failed.\n");
-    return -1;
-  }
-  if (add_hook_syschdir() != 0) {
-    printk(KERN_INFO "add_hook_syschdir failed.\n");
-    return -1;
-  }
-
+  ADD_HOOK_SYS(open);
+  ADD_HOOK_SYS(chdir);
+  ADD_HOOK_SYS(stat);
+  ADD_HOOK_SYS(stat64);
 
   return 0;
 }
 
-/* 
- * Cleanup - unregister the appropriate file from /proc 
+/*
+ * Cleanup - unregister the appropriate file from /proc
  */
+
+
 void cleanup_module()
 {
-  if (sys_call_table[__NR_open] != sys_open_wrapper) {
-    printk(KERN_ALERT "Somebody else also played with the ");
-    printk(KERN_ALERT "open system call\n");
-    printk(KERN_ALERT "The system may be left in ");
-    printk(KERN_ALERT "an unstable state.\n");
-  } else {
-    sys_call_table[__NR_open] = original_call;
-    printk(KERN_INFO "replaced open as usual.\n");
-  }
+  CLEANUP_SYSCALL(open);
+  CLEANUP_SYSCALL(chdir);
+  CLEANUP_SYSCALL(stat);
+  CLEANUP_SYSCALL(stat64);
 
-  if (sys_call_table[__NR_chdir] != sys_chdir_wrapper) {
-    printk(KERN_ALERT "Somebody else also played with the ");
-    printk(KERN_ALERT "chdir system call\n");
-    printk(KERN_ALERT "The system may be left in ");
-    printk(KERN_ALERT "an unstable state.\n");
-  } else {
-    sys_call_table[__NR_chdir] = original_syschdir;
-    printk(KERN_INFO "replaced chdir as usual.\n");
-  }
   printk("ended open_hack module\n");
   return;
 }
