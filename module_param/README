@@ -2,3 +2,11 @@ Module parameter receiving test.
 
 If any error occurs, init_module function should return -1, rather than 1 or 0.
 The 4th param of module_param_array is permission, that I do not know...
+
+usage:
+ make
+ sudo insmod module_param.ko pid_array=1,2,3 node_array=4,5,6
+ dmesg
+
+
+

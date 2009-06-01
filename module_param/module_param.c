@@ -33,10 +33,10 @@ MODULE_LICENSE("GPL");
 /* 
  * UID of the initial processes owner.
 
- */
+
 static int initial_uid;
 module_param(initial_uid, int, 0644);
-
+ */
 
 /*
   Gets a mapping of (process id -> node id)
@@ -57,12 +57,13 @@ int init_module()
   int i;
   struct task_struct *task = &init_task;
 
-  printk(KERN_INFO "pid_array %d\n", pid_array_count);
-
   if (!pid_array_count) {
     printk(KERN_INFO "specify node_array and pid_array\n");
     return -1;
   }
+
+  printk(KERN_INFO "pid_array %d\n", pid_array_count);
+
 
   if (pid_array_count != node_array_count) {
     printk(KERN_INFO "Array size mismatch: pid_array and node_array\n");
