@@ -113,7 +113,11 @@ void mark_process(void) {
 
 
 asmlinkage int (*original_call) (const char *, int, int);
-asmlinkage int (*original_syschdir) (const char*);
+//asmlinkage int (*original_syschdir) (const char*);
+
+#define REPLACE_SYSCALL(call) \
+  asmlinkage int (*original_sys##call) (const char *);
+REPLACE_SYSCALL(chdir)
 
 asmlinkage int sys_chdir_wrapper(/* const */ char *filename)
 {
