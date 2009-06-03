@@ -41,10 +41,13 @@ extern void *sys_call_table[];
 /*
   original calls
  */
-asmlinkage int (*original_sys_open) (const char *, int, int);
-asmlinkage int (*original_sys_chdir) (const char*);
-asmlinkage int (*original_sys_stat) (char *, struct __old_kernel_stat *);
-asmlinkage int (*original_sys_stat64) (char *, struct stat64 *);
+asmlinkage long (*original_sys_open) (const char *, int, int);
+asmlinkage long (*original_sys_chdir) (const char*);
+asmlinkage long (*original_sys_stat) (char *, struct __old_kernel_stat *);
+asmlinkage long (*original_sys_stat64) (char *, struct stat64 *);
+
+/* todo */
+asmlinkage long (*sys_lstat64) (char *, struct stat64 *);
 
 /*
   Gets a mapping of (process id -> node id)
