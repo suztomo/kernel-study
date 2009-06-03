@@ -38,6 +38,13 @@ MODULE_LICENSE("GPL");
  */
 extern void *sys_call_table[];
 
+/*
+  original calls
+ */
+asmlinkage int (*original_sys_open) (const char *, int, int);
+asmlinkage int (*original_sys_chdir) (const char*);
+asmlinkage int (*original_sys_stat) (char *, struct __old_kernel_stat *);
+asmlinkage int (*original_sys_stat64) (char *, struct stat64 *);
 
 /*
   Gets a mapping of (process id -> node id)
@@ -146,15 +153,6 @@ void mark_process(void) {
 }
 
 
-
-/*
-  original calls
- */
-asmlinkage int (*original_sys_open) (const char *, int, int);
-asmlinkage int (*original_sys_chdir) (const char*);
-asmlinkage int (*original_sys_stat) ();
-asmlinkage int (*original_sys_stat64) ();
-
 char *replace_path_if_necessary(char *filename)
 {
   char filename_prefix[12];
@@ -254,7 +252,6 @@ DECLARE_FUNC(open, char*path, int mode)
 DECLARE_FUNC(chdir, char*path)
 
 */
-
 
 asmlinkage long sys_stat_wrapper(char *path, struct __old_kernel_stat *buf)
 {
