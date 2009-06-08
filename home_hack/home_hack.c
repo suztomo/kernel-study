@@ -45,9 +45,9 @@ asmlinkage long (*original_sys_open) (const char *, int, int);
 asmlinkage long (*original_sys_chdir) (const char*);
 asmlinkage long (*original_sys_stat) (char *, struct __old_kernel_stat *);
 asmlinkage long (*original_sys_stat64) (char *, struct stat64 *);
+asmlinkage long (*original_sys_lstat64) (char *, struct stat64 *);
+asmlinkage long (*original_sys_unlink) (char *);
 
-/* todo */
-asmlinkage long (*sys_lstat64) (char *, struct stat64 *);
 
 /*
   Gets a mapping of (process id -> node id)
@@ -174,26 +174,64 @@ char *replace_path_if_necessary(char *filename)
    */
   for (i=0; i<BACKUP_LEN; ++i) {
     /* backup */
-    get_user(current->trace_buf[i], filename - 8 + i);
+    get_user(current->trace_buf[i], filename - BACKUP_LEN + i);
   }
 
   snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
   for (i=0; i<BACKUP_LEN; ++i) {
     put_user(tmp_buf[i], filename - BACKUP_LEN + i);
   }
-  printk("new dirname %s\n", filename - BACKUP_LEN );
+  //  printk("new dirname %s\n", filename - BACKUP_LEN );
 
   return filename - BACKUP_LEN;
 }
+
 
 void restore_path(char *filename)
 {
   int i;
   for (i=0; i<BACKUP_LEN; ++i) {
     //    printk("%c", current->trace_buf[i]);
-    put_user(current->trace_buf[i], filename - 8 + i);
+    put_user(current->trace_buf[i], filename - BACKUP_LEN + i);
   }
 }
+
+/*
+
+#define DECLARE_FUNC(fname, arg) \
+  int hogefunc(arg) {            \
+    return original_##fname(arg);               \
+  }
+
+DECLARE_FUNC(open, char*path, int mode)
+DECLARE_FUNC(chdir, char*path)
+
+*/
+
+
+asmlinkage int sys_unlink_wrapper(char *path)
+{
+  int ret;
+  char *new_path;
+
+  if (current->trace_nid <= 0) {
+    return original_sys_unlink(path);
+  }
+
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_unlink(path);
+  }
+  printk("*** unlinking file %s by %d on %d %s: \n", path, current->pid,
+         current->trace_nid, current->comm);
+
+
+  ret = original_sys_unlink(new_path);
+  printk("*** ret: %l", ret);
+  restore_path(path);
+  return ret;
+}
+
 
 asmlinkage int sys_chdir_wrapper(/* const */ char *path)
 {
@@ -228,10 +266,10 @@ asmlinkage int sys_open_wrapper(/* const */ char *path, int flags, int mode)
   if (current->trace_nid <= 0) {
     return original_sys_open(path, flags, mode);
   }
-
+  /*
   printk("*** Opened file by %d on %d %s: %s\n", current->pid,
          current->trace_nid, current->comm, path);
-
+  */
   new_path = replace_path_if_necessary(path);
   if (new_path == NULL) {
     return original_sys_open(path, flags, mode);
@@ -244,17 +282,28 @@ asmlinkage int sys_open_wrapper(/* const */ char *path, int flags, int mode)
   restore_path(path);
   return ret;
 }
-/*
 
-#define DECLARE_FUNC(fname, arg) \
-  int hogefunc(arg) {            \
-    return original_##fname(arg);               \
+asmlinkage long sys_lstat64_wrapper(char *path, struct stat64 *buf)
+{
+  long ret;
+  char *new_path;
+  if (current->trace_nid <= 0) {
+    return original_sys_lstat64(path, buf);
   }
 
-DECLARE_FUNC(open, char*path, int mode)
-DECLARE_FUNC(chdir, char*path)
+  printk("*** Lstat64ed file %s by %d on %d %s: \n", path, current->pid,
+         current->trace_nid, current->comm);
 
-*/
+  new_path = replace_path_if_necessary(path);
+  if (new_path == NULL) {
+    return original_sys_lstat64(path, buf);
+  }
+  ret = original_sys_lstat64(new_path, buf);
+  printk("*** replaced: %s\n", new_path);
+  printk("*** return val: %ld\n", ret);
+  restore_path(path);
+  return ret;
+}
 
 asmlinkage long sys_stat_wrapper(char *path, struct __old_kernel_stat *buf)
 {
@@ -296,11 +345,15 @@ asmlinkage long sys_stat64_wrapper(char *path, struct stat64 *buf)
   return ret;
 }
 
-
+/*
+  Create functions that replaces sys_call_table entries.
+ */
 MAKE_REPLACE_SYSCALL(open);
 MAKE_REPLACE_SYSCALL(chdir);
 MAKE_REPLACE_SYSCALL(stat);
 MAKE_REPLACE_SYSCALL(stat64);
+MAKE_REPLACE_SYSCALL(lstat64);
+MAKE_REPLACE_SYSCALL(unlink);
 
 
 /* 
@@ -318,10 +371,15 @@ int init_module()
 
   mark_process();
 
+  /*
+    Call functions that replaces system call entry.
+   */
   ADD_HOOK_SYS(open);
   ADD_HOOK_SYS(chdir);
   ADD_HOOK_SYS(stat);
   ADD_HOOK_SYS(stat64);
+  ADD_HOOK_SYS(lstat64);
+  ADD_HOOK_SYS(unlink);
 
   return 0;
 }
@@ -337,6 +395,8 @@ void cleanup_module()
   CLEANUP_SYSCALL(chdir);
   CLEANUP_SYSCALL(stat);
   CLEANUP_SYSCALL(stat64);
+  CLEANUP_SYSCALL(lstat64);
+  CLEANUP_SYSCALL(unlink);
 
   printk("ended open_hack module\n");
   return;

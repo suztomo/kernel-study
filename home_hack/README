@@ -5,3 +5,28 @@ Example
  sudo insmod open_hack.ko pid_array=4232 node_array=1
  dmesg
  return
+
+
+Add a system call
+Create a location that stores the original call's address.
+The declartion can be found in linux/syscalls.h
+
+  asmlinkage long (*original_sys_lstat64) (char *, struct stat64 __user *);
+
+Create a wrapper of the system call.
+
+  asmlinkage long sys_lstat64_wrapper(char *path, struct stat64 *buf)
+  {
+   ...
+  }
+
+Add a replace entry for the system call.
+  MAKE_REPLACE_SYSCALL(lstat64);
+
+
+Add a hook in init_module()
+  ADD_HOOK_SYS(stat64);
+
+
+clean up in cleanup_module()
+  CLEANUP_SYSCALL(lstat64);
