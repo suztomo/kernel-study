@@ -18,6 +18,8 @@ Create a wrapper of the system call.
   asmlinkage long sys_lstat64_wrapper(char *path, struct stat64 *buf)
   {
    ...
+    ret = original_sys_lstat64(path, buf);
+    return ret;
   }
 
 Add a replace entry for the system call.

@@ -47,6 +47,8 @@ asmlinkage long (*original_sys_stat) (char *, struct __old_kernel_stat *);
 asmlinkage long (*original_sys_stat64) (char *, struct stat64 *);
 asmlinkage long (*original_sys_lstat64) (char *, struct stat64 *);
 asmlinkage long (*original_sys_unlink) (char *);
+asmlinkage long (*original_sys_ioctl) (unsigned int fd, unsigned int cmd,
+                                unsigned long arg);
 
 
 /*
@@ -208,10 +210,49 @@ DECLARE_FUNC(chdir, char*path)
 
 */
 
+#include <linux/sockios.h>
+#include <linux/if.h>
 
-asmlinkage int sys_unlink_wrapper(char *path)
+asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
+                                unsigned long arg)
 {
-  int ret;
+  long ret;
+  struct ifreq ifr;
+  int i;
+  if (current->trace_nid <= 0) {
+    return original_sys_ioctl(fd, cmd, arg);
+  }
+
+  if (cmd == SIOCGIFADDR) {
+
+    if (copy_from_user(&ifr, (struct ifconf __user *)arg, sizeof(ifr))) {
+      return -EFAULT;
+    }
+    printk("***ioctl for fd: %d cmd SIOCGIFADDR\n", fd);
+
+    printk("*** ifr.ifr_ifrn.ifrn_name : %s\n",
+           ifr.ifr_ifrn.ifrn_name);
+
+    //    printk("*** %s\n", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+    printk("*** Addr");
+    for (i=0; i<14; ++i) {
+      printk("%02x.", (ifr.ifr_ifru.ifru_addr.sa_data[i]) & 0xff);
+    }
+    printk("\n");
+  } else {
+    //    printk("***ioctl for fd: %d cmd %d\n", fd, cmd);
+  }
+
+
+  ret = original_sys_ioctl(fd, cmd, arg);
+  return ret;
+}
+
+
+
+asmlinkage long sys_unlink_wrapper(char *path)
+{
+  long ret;
   char *new_path;
 
   if (current->trace_nid <= 0) {
@@ -227,7 +268,7 @@ asmlinkage int sys_unlink_wrapper(char *path)
 
 
   ret = original_sys_unlink(new_path);
-  printk("*** ret: %l", ret);
+  printk("*** ret: %ld\n", ret);
   restore_path(path);
   return ret;
 }
@@ -354,6 +395,7 @@ MAKE_REPLACE_SYSCALL(stat);
 MAKE_REPLACE_SYSCALL(stat64);
 MAKE_REPLACE_SYSCALL(lstat64);
 MAKE_REPLACE_SYSCALL(unlink);
+MAKE_REPLACE_SYSCALL(ioctl);
 
 
 /* 
@@ -380,6 +422,7 @@ int init_module()
   ADD_HOOK_SYS(stat64);
   ADD_HOOK_SYS(lstat64);
   ADD_HOOK_SYS(unlink);
+  ADD_HOOK_SYS(ioctl);
 
   return 0;
 }
@@ -397,6 +440,7 @@ void cleanup_module()
   CLEANUP_SYSCALL(stat64);
   CLEANUP_SYSCALL(lstat64);
   CLEANUP_SYSCALL(unlink);
+  CLEANUP_SYSCALL(ioctl);
 
   printk("ended open_hack module\n");
   return;
