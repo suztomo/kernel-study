@@ -30,7 +30,7 @@ int main ()
     printf("%s\n", ifr[i].ifr_name);
     for (j=0; j<14; ++j) {
       //#define	ifr_addr	ifr_ifru.ifru_addr
-      printf("%02x", ifr[i].ifr_addr.sa_data[j] & 0xff);
+      printf("%02x", ifr[i].ifr_ifru.ifru_addr.sa_data[j] & 0xff);
     }
     printf("\n");
   }

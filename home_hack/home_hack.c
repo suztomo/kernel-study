@@ -223,6 +223,15 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
     return original_sys_ioctl(fd, cmd, arg);
   }
 
+  ret = original_sys_ioctl(fd, cmd, arg);
+  /*
+  if (cmd == SIOCGIFCONF) {
+
+    if (copy_from_user(&ifr, (struct ifconf __user *)arg, sizeof(ifr))) {
+      return -EFAULT;
+    }
+  }
+  */
   if (cmd == SIOCGIFADDR) {
 
     if (copy_from_user(&ifr, (struct ifconf __user *)arg, sizeof(ifr))) {
@@ -234,7 +243,7 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
            ifr.ifr_ifrn.ifrn_name);
 
     //    printk("*** %s\n", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
-    printk("*** Addr");
+    printk("***Addr ");
     for (i=0; i<14; ++i) {
       printk("%02x.", (ifr.ifr_ifru.ifru_addr.sa_data[i]) & 0xff);
     }
@@ -243,8 +252,6 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
     //    printk("***ioctl for fd: %d cmd %d\n", fd, cmd);
   }
 
-
-  ret = original_sys_ioctl(fd, cmd, arg);
   return ret;
 }
 
