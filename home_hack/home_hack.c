@@ -234,7 +234,7 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
   */
   if (cmd == SIOCGIFADDR) {
 
-    if (copy_from_user(&ifr, (struct ifconf __user *)arg, sizeof(ifr))) {
+    if (copy_from_user(&ifr, (struct ifreq __user *)arg, sizeof(ifr))) {
       return -EFAULT;
     }
     printk("***ioctl for fd: %d cmd SIOCGIFADDR\n", fd);
@@ -248,6 +248,13 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
       printk("%02x.", (ifr.ifr_ifru.ifru_addr.sa_data[i]) & 0xff);
     }
     printk("\n");
+    ifr.ifr_ifru.ifru_addr.sa_data[5] = (char)(current->trace_nid & 0xff);
+    printk("new 5th : %02x.\n", (ifr.ifr_ifru.ifru_addr.sa_data[5]));
+
+    if (copy_to_user((struct ifreq __user *)arg, &ifr, sizeof(ifr))) {
+      return -EFAULT;
+    }
+
   } else {
     //    printk("***ioctl for fd: %d cmd %d\n", fd, cmd);
   }
