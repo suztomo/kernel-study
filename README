@@ -3,3 +3,15 @@ Linux kernel hacks study
 References
 http://tldp.org/LDP/lkmpg/2.6/html/
 
+
+To make vulnerable kernel:
+
+in arch/x86/kernel/entry_32.S
+  .data
+  include "sys_call_table_32.S"
+
+In kernel/kallsyms.c
+  extern void * sys_call_table[];
+  EXPORT_SYMBOL(sys_call_table);
+
+
