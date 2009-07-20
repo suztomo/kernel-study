@@ -18,7 +18,6 @@
 #include <linux/unistd.h>	/* The list of system calls */
 
 #include <linux/mm.h> /* VM_READ etc */
-#include <asm-x86/cacheflush.h> /* change_page_attr */
 
 /* 
  * For the current (process) structure, we need
@@ -45,26 +44,6 @@ extern void *sys_call_table[];
 //void *sys_call_table_local;
 //void **sys_call_table_local[];
 
-unsigned long **find_sys_call_table(void)
-{
-
-  unsigned long **sctable;
-  unsigned long ptr;
-  sctable = NULL;
-  for (ptr = (unsigned long)&strstr;
-       ptr < (unsigned long)&boot_cpu_data;
-       ptr += sizeof(void*)) {
-
-    unsigned long *p;
-    p = (unsigned long *)ptr;
-    if (p[__NR_close] == (unsigned long) sys_close) {
-      sctable = (unsigned long **)p;
-      return &sctable[0];
-    }
-  }
-  return NULL;
-}
-
 /* 
  * UID we want to spy on - will be filled from the
  * command line 
@@ -83,7 +62,7 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
   /* 
    * Check if this is the user we're spying on 
    */
-  if (uid == current->uid) {
+  if (uid == current->cred->uid) {
     /* 
      * Report the file, if relevant 
      */
@@ -101,21 +80,6 @@ asmlinkage int our_sys_open(const char *filename, int flags, int mode)
    * the ability to open files 
    */
   ret = original_call(filename, flags, mode);
-
-  i = 0;
-  if (uid == current->uid) {
-    /* 
-     * Report the file, if relevant 
-     */
-    printk("2: Opened file by %d: ", uid);
-    do {
-      get_user(ch, filename + i);
-      i++;
-      printk("%c", ch);
-    } while (ch);
-    printk("\n");
-  }
-
   return ret;
 }
 
