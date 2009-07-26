@@ -35,14 +35,64 @@ proc_pid_readdir_hook original_in_proc_pid_readdir;
 
 int func_proc_pid_readdir (struct tgid_iter *iter) {
   int ret = 0;
-  printk("*** %s ", iter->task->comm);
-  printk(" <- %s", current->comm);
-  if (strcmp(iter->task->comm, "sshd") == 0) {
-    printk("  *** skipped! ***");
-    ret = 1;
+  if (current->hp_node > 0) {
+    if (iter->task->hp_node != current->hp_node) {
+      printk("*** %s ", iter->task->comm);
+      printk(" <- %s", current->comm);
+      printk("  *** skipped! ***");
+      printk("\n");
+      ret = 1;
+    }
   }
-  printk("\n");
   return ret;
+}
+
+
+/*
+  Gets a mapping of (process id -> node id)
+  Fill unused entries with -1.
+ */
+#define PID_ARRAY_MAX 16
+int pid_array[PID_ARRAY_MAX];
+int pid_array_count;
+module_param_array(pid_array, int, &pid_array_count, 0000);
+
+int node_array[PID_ARRAY_MAX];
+int node_array_count;
+module_param_array(node_array, int, &node_array_count, 0000);
+
+int is_target_proc(pid_t candidate_pid)
+{
+  int i;
+  int p_i = (int)candidate_pid;
+
+  for (i=0; i<pid_array_count; ++i) {
+    if (pid_array[i] < 0) {
+      break;
+    }
+    if (pid_array[i] == p_i) {
+      return i;
+    }
+  }
+  return -1;
+}
+
+
+/*
+  Traverse Tasks, marking to-be-traced if it is one of target processes.
+*/
+void mark_process(void) {
+  struct task_struct *task = &init_task;
+  int node_index;
+  do {
+    if ((node_index = is_target_proc(task->pid)) >= 0) {
+      task->hp_node = node_array[node_index];
+      printk(KERN_INFO "*** %s [%ld] parent %s\n",
+             task->comm, task->hp_node, task->parent->comm);
+    } else {
+      task->hp_node = 0;
+    }
+  } while ((task = next_task(task)) != &init_task);
 }
 
 
@@ -51,12 +101,7 @@ int func_proc_pid_readdir (struct tgid_iter *iter) {
  */
 int init_module()
 {
-  struct task_struct *task = &init_task;
-  do {
-    printk(KERN_INFO "*** %s [%d] parent %s\n",
-           task->comm, task->pid, task->parent->comm);
-    task->hp_node = -1;
-  } while ((task = next_task(task)) != &init_task);
+  mark_process();
 
   /* Any lock ? */
 
