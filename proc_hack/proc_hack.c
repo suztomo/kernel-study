@@ -35,7 +35,7 @@ proc_pid_readdir_hook original_in_proc_pid_readdir;
 
 int func_proc_pid_readdir (struct tgid_iter *iter) {
   int ret = 0;
-  if (current->hp_node > 0) {
+  if (current->hp_node >= 0) {
     if (iter->task->hp_node != current->hp_node) {
       printk("*** %s ", iter->task->comm);
       printk(" <- %s", current->comm);
@@ -90,7 +90,7 @@ void mark_process(void) {
       printk(KERN_INFO "*** %s [%ld] parent %s\n",
              task->comm, task->hp_node, task->parent->comm);
     } else {
-      task->hp_node = 0;
+      task->hp_node = -1;
     }
   } while ((task = next_task(task)) != &init_task);
 }
