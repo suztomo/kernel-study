@@ -18,7 +18,7 @@
 #include <linux/unistd.h>	/* The list of system calls */
 
 #include <linux/mm.h> /* VM_READ etc */
-#include <asm-x86/cacheflush.h> /* change_page_attr */
+/* #include <asm-x86/cacheflush.h>  change_page_attr */
 
 /* 
  * For the current (process) structure, we need
@@ -148,11 +148,11 @@ void mark_process(void) {
   int node_index;
   do {
     if ((node_index = is_target_proc(task->pid)) >= 0) {
-      task->trace_nid = node_array[node_index];
-      printk(KERN_INFO "*** %s [%d] parent %s\n",
-             task->comm, task->trace_nid, task->parent->comm);
+      task->hp_node = node_array[node_index];
+      printk(KERN_INFO "*** %s [%ld] parent %s\n",
+             task->comm, task->hp_node, task->parent->comm);
     } else {
-      task->trace_nid = -1;
+      task->hp_node = -1;
     }
   } while ((task = next_task(task)) != &init_task);
 }
@@ -176,10 +176,10 @@ char *replace_path_if_necessary(char *filename)
    */
   for (i=0; i<BACKUP_LEN; ++i) {
     /* backup */
-    get_user(current->trace_buf[i], filename - BACKUP_LEN + i);
+    get_user(current->hp_buf[i], filename - BACKUP_LEN + i);
   }
 
-  snprintf(tmp_buf, 12, "/j/%05d", current->trace_nid);
+  snprintf(tmp_buf, 12, "/j/%05ld", current->hp_node);
   for (i=0; i<BACKUP_LEN; ++i) {
     put_user(tmp_buf[i], filename - BACKUP_LEN + i);
   }
@@ -193,8 +193,8 @@ void restore_path(char *filename)
 {
   int i;
   for (i=0; i<BACKUP_LEN; ++i) {
-    //    printk("%c", current->trace_buf[i]);
-    put_user(current->trace_buf[i], filename - BACKUP_LEN + i);
+    //    printk("%c", current->hp_buf[i]);
+    put_user(current->hp_buf[i], filename - BACKUP_LEN + i);
   }
 }
 
@@ -219,7 +219,7 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
   long ret;
   struct ifreq ifr;
   int i;
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_ioctl(fd, cmd, arg);
   }
 
@@ -248,7 +248,7 @@ asmlinkage long sys_ioctl_wrapper(unsigned int fd, unsigned int cmd,
       printk("%02x.", (ifr.ifr_ifru.ifru_addr.sa_data[i]) & 0xff);
     }
     printk("\n");
-    ifr.ifr_ifru.ifru_addr.sa_data[5] = (char)(current->trace_nid & 0xff);
+    ifr.ifr_ifru.ifru_addr.sa_data[5] = (char)(current->hp_node & 0xff);
     printk("new 5th : %02x.\n", (ifr.ifr_ifru.ifru_addr.sa_data[5]));
 
     if (copy_to_user((struct ifreq __user *)arg, &ifr, sizeof(ifr))) {
@@ -269,7 +269,7 @@ asmlinkage long sys_unlink_wrapper(char *path)
   long ret;
   char *new_path;
 
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_unlink(path);
   }
 
@@ -277,8 +277,8 @@ asmlinkage long sys_unlink_wrapper(char *path)
   if (new_path == NULL) {
     return original_sys_unlink(path);
   }
-  printk("*** unlinking file %s by %d on %d %s: \n", path, current->pid,
-         current->trace_nid, current->comm);
+  printk("*** unlinking file %s by %d on %ld %s: \n", path, current->pid,
+         current->hp_node, current->comm);
 
 
   ret = original_sys_unlink(new_path);
@@ -293,7 +293,7 @@ asmlinkage int sys_chdir_wrapper(/* const */ char *path)
   int ret;
   char *new_path;
 
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     /*
       When the current process is not our target
     */
@@ -318,12 +318,12 @@ asmlinkage int sys_open_wrapper(/* const */ char *path, int flags, int mode)
 {
   int ret;
   char *new_path;
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_open(path, flags, mode);
   }
   /*
   printk("*** Opened file by %d on %d %s: %s\n", current->pid,
-         current->trace_nid, current->comm, path);
+         current->hp_node, current->comm, path);
   */
   new_path = replace_path_if_necessary(path);
   if (new_path == NULL) {
@@ -342,12 +342,12 @@ asmlinkage long sys_lstat64_wrapper(char *path, struct stat64 *buf)
 {
   long ret;
   char *new_path;
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_lstat64(path, buf);
   }
 
-  printk("*** Lstat64ed file %s by %d on %d %s: \n", path, current->pid,
-         current->trace_nid, current->comm);
+  printk("*** Lstat64ed file %s by %d on %ld %s: \n", path, current->pid,
+         current->hp_node, current->comm);
 
   new_path = replace_path_if_necessary(path);
   if (new_path == NULL) {
@@ -364,12 +364,12 @@ asmlinkage long sys_stat_wrapper(char *path, struct __old_kernel_stat *buf)
 {
   long ret;
   char *new_path;
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_stat(path, buf);
   }
 
-  printk("*** Stated file %s by %d on %d %s: \n", path, current->pid,
-         current->trace_nid, current->comm);
+  printk("*** Stated file %s by %d on %ld %s: \n", path, current->pid,
+         current->hp_node, current->comm);
 
   new_path = replace_path_if_necessary(path);
   if (new_path == NULL) {
@@ -384,12 +384,12 @@ asmlinkage long sys_stat64_wrapper(char *path, struct stat64 *buf)
 {
   long ret;
   char *new_path;
-  if (current->trace_nid <= 0) {
+  if (current->hp_node <= 0) {
     return original_sys_stat64(path, buf);
   }
 
-  printk("*** Stat64ed file %s by %d on %d %s: \n", path, current->pid,
-         current->trace_nid, current->comm);
+  printk("*** Stat64ed file %s by %d on %ld %s: \n", path, current->pid,
+         current->hp_node, current->comm);
 
   new_path = replace_path_if_necessary(path);
   if (new_path == NULL) {
